@@ -1,0 +1,125 @@
+---
+title: "comparison"
+output: html_document
+---
+```{r}
+library(dplyr)
+library(caret)
+library(zoo)
+library(knitr)
+```
+
+# Reading and cleaning data
+```{r cache = TRUE}
+data_sonar<- read.csv('sonar.all-data')
+data_spect<- read.csv('SPECT.train')
+data_spect_test<- read.csv('SPECT.test')
+names(data_spect_test) <- names(data_spect)
+data_spect <- data_spect %>% rbind(data_spect_test)
+data_hep<- read.csv('hepatitis.data')
+data_hep[data_hep=='?']<- NA
+data_hep <- apply(data_hep,2,function(x)as.numeric(as.character(x))) %>% as.data.frame()
+data_hep <- na.aggregate(data_hep)
+data_pima <- read.csv('pima-indians-diabetes.data')
+```
+
+# Experiment setup
+Init result dataframe
+
+```{r}
+result <- data.frame(TP=double(),FP=double(),FN=double(),TN=double())
+```
+
+setup the trainControl for 10 cross validation with 10 repeats
+
+```{r}
+train_control <- trainControl(
+  method = "repeatedcv",
+  number = 10,
+  repeats = 10)
+```
+
+setup loop variables
+
+```{r cache = TRUE}
+data_sets <- list(data_sonar,data_spect,data_hep,data_pima)
+data_sets_name <- c('sonar','SPECT','hepatitis','pima-indians')
+models <- c('J48','rf','svmLinear','nb','nnet','treebag','bstTree')
+data_set_col = vector()
+model_col = vector()
+i<-1
+```
+
+# Execution
+Main loop for training and testing c4.5,random forest, svm,naive bayes, neural network, bagged cart and boosted tree using 10 cross validation on the 4 data sets. 
+```{r}
+for(data_set in data_sets){
+  train_set<- data_set %>% as.data.frame() %>% sample_frac(0.8)
+  feat <- train_set[,1:ncol(train_set)-1]
+  label <- as.factor(train_set[,ncol(train_set)])
+  train_set_ids<- train_set %>% rownames() %>% as.numeric() %>% sapply(function(x) -x)
+  test_set<- data_set[train_set_ids,]
+  names(test_set) <- names(train_set)
+  for (model in models){
+    data_set_col[length(data_set_col)+1]<- data_sets_name[i]
+    model_col[length(model_col)+1]<- model
+    trained_model <- train(x = feat, y =label, method = model, trControl= train_control)
+    pred <- trained_model %>% predict(newdata = test_set) %>%
+      as.data.frame()
+    pred <- pred %>% cbind(test_set %>% dplyr::select(ncol(test_set)))
+    names(pred) <- c('predicted','actual')
+    temp <- pred %>% group_by(predicted,actual) %>% summarize(result=n()*100/nrow(pred)) %>% ungroup() %>% dplyr::select(result) 
+    result <- rbind(result,temp[[1]])
+    temp <- NULL
+  }
+  i<- i+1
+}
+```
+
+adding data set and model type to result
+```{r}
+result<-result %>% cbind(unlist(model_col))
+result<-result %>% cbind(unlist(data_set_col))
+```
+
+using the whole data without split on c4.5 base classifier and adding it's confusion matrix to the result data frame
+```{r}
+trained_model <- train(x = data_sonar[,1:60], y =data_sonar[,61], method = 'J48')
+col <- data.frame(confusionMatrix.train(trained_model)['table'])$table.Freq %>% as.numeric()
+col[length(col)+1]<- 'J48 base'
+col[length(col)+1]<- 'sonar'
+result <- result %>% rbind(col)
+```
+
+renaming and reformting columns
+
+```{r}
+names(result) <- c('TP','FP','FN','TN','Model','data_set')
+result$TP <- result$TP %>% as.numeric()
+result$FP <- result$FP %>% as.numeric()
+result$FN <- result$FN %>% as.numeric()
+result$TN <- result$TN %>% as.numeric()
+```
+
+calculating accuracy , precision , recall and f1-score for all the previous classifiers
+```{r}
+result <- result %>% mutate(accuracy = (TP+TN)*100/(TP+TN+FP+FN),precision = TP*100/(TP+FP),recall=TP*100/(TP+FN)) %>% 
+  mutate(F1score = 2*precision*recall/(precision+recall))
+result %>% kable
+```
+
+# T-Test
+```{r cache = TRUE}
+for(model in models){
+  for(inner_model in models){
+    for(data_set in data_sets){
+      t.test(result %>% filter(Model==model) %>% dplyr::select(accuracy),result %>% x = filter(Model==inner_model) %>% dplyr::select(accuracy))
+            t.test(result %>% filter(Model==model) %>% dplyr::select(precision),result %>% x = filter(Model==inner_model) %>% dplyr::select(precision))
+                  t.test(result %>% filter(Model==model) %>% dplyr::select(recall),result %>% x = filter(Model==inner_model) %>% dplyr::select(recall))
+                        t.test(result %>% filter(Model==model) %>% dplyr::select(F1score),result %>% x = filter(Model==inner_model) %>% dplyr::select(F1score))
+    }
+  }
+}
+```
+
+
