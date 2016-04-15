@@ -3,6 +3,7 @@ title: "comparison"
 output: html_document
 ---
 ```{r}
+library(plyr)
 library(dplyr)
 library(caret)
 library(zoo)
@@ -41,7 +42,7 @@ train_control <- trainControl(
 
 setup loop variables
 
-```{r cache = TRUE}
+```{r}
 data_sets <- list(data_sonar,data_spect,data_hep,data_pima)
 data_sets_name <- c('sonar','SPECT','hepatitis','pima-indians')
 models <- c('J48','rf','svmLinear','nb','nnet','treebag','bstTree')
@@ -52,7 +53,7 @@ i<-1
 
 # Execution
 Main loop for training and testing c4.5,random forest, svm,naive bayes, neural network, bagged cart and boosted tree using 10 cross validation on the 4 data sets. 
-```{r}
+```{r cache = TRUE}
 for(data_set in data_sets){
   train_set<- data_set %>% as.data.frame() %>% sample_frac(0.8)
   feat <- train_set[,1:ncol(train_set)-1]
@@ -68,7 +69,7 @@ for(data_set in data_sets){
       as.data.frame()
     pred <- pred %>% cbind(test_set %>% dplyr::select(ncol(test_set)))
     names(pred) <- c('predicted','actual')
-    temp <- pred %>% group_by(predicted,actual) %>% summarize(result=n()*100/nrow(pred)) %>% ungroup() %>% dplyr::select(result) 
+    temp <- pred %>% group_by(predicted,actual) %>% dplyr::summarize(result= n()*100/nrow(pred)) %>% ungroup() %>% dplyr::select(result) 
     result <- rbind(result,temp[[1]])
     temp <- NULL
   }
@@ -103,13 +104,16 @@ result$TN <- result$TN %>% as.numeric()
 
 calculating accuracy , precision , recall and f1-score for all the previous classifiers
 ```{r}
-result <- result %>% mutate(accuracy = (TP+TN)*100/(TP+TN+FP+FN),precision = TP*100/(TP+FP),recall=TP*100/(TP+FN)) %>% 
-  mutate(F1score = 2*precision*recall/(precision+recall))
+result <- result %>% dplyr::mutate(accuracy = (TP+TN)*100/(TP+TN+FP+FN),precision = TP*100/(TP+FP),recall=TP*100/(TP+FN)) %>% 
+  dplyr::mutate(F1score = 2*precision*recall/(precision+recall))
+```
+# Result Table 
+```{r}
 result %>% kable
 ```
 
 # T-Test
-```{r cache = TRUE}
+```{r}
 for(model in models){
   for(inner_model in models){
     for(data_set in data_sets){
